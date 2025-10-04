@@ -20,7 +20,7 @@
 
 
 #define WINDOW_SIZE 10
-#define TIMER_DURATION 300 // will be a lot smaller for this in actual implementation I reckon. "Somewhere between 10-100ms depending on environment"
+#define TIMER_DURATION 20 // 20 for loopback testing - will want to bump this up for isen
 
 int main(int argc, char* argv[]) {
 
@@ -165,21 +165,34 @@ int main(int argc, char* argv[]) {
                 // Slide window forward iff this ack advances base
                 if(newBase > base) {
                     base = newBase;
-                    if(base == nextSeqNum) rto.stop();
+                    if(base == nextSeqNum) {
+                        rto.stop(); // no packets in flight.
+                    } else {
+                        rto.start(); // restart timer for new base.
+                    }
                 }
+
+                // implicitly ignoring duplicate (old #) ACKs
             }
  
             // Check to see if the timer has expired.
             if(rto.timeout()) {
-                // In no-loss testing, this should never trigger because ACKs arrive and move base before RTO expires.
-                // Keep the branch to make it easy to add retransmissions later.
-                TRACE << "TIMEOUT OF RTO" << ENDL;
+                WARNING << "TIMEOUT OF RTO: Retransmitting Window Starting At " << base << ENDL;
+
+                // Retransmit window
+                for(uint16_t s = base; s < nextSeqNum; s++) {
+                    udt.udt_send(window[s % WINDOW_SIZE]);
+                }
+
+                // Try timer again.
+                rto.start();
             }
         }
 
         // cleanup and close the file and network.
 
         // Sending an empty payload to indicate end.
+        // We don't receive an ACK/Signal from receiver that they've seen this. So consider sending this a few times in case of loss?
         datagramS fin{};
         fin.seqNum = nextSeqNum;
         fin.ackNum = 0;
